@@ -3,7 +3,7 @@ import Foundation
 struct MCPToolDefinition: Decodable {
     let name: String
     let description: String?
-    let inputSchema: [String: AnyCodable]
+    let inputSchema: [String: JSONValue]
 }
 
 struct MCPToolsListResponse: Decodable {
@@ -78,7 +78,7 @@ final class MCPGatewayClient {
         mcpBaseURL: String,
         apiKey: String,
         toolName: String,
-        arguments: [String: Any]
+        arguments: [String: JSONValue]
     ) async throws -> String {
         let url = try makeToolCallURL(mcpBaseURL: mcpBaseURL, apiKey: apiKey)
         var request = URLRequest(url: url)
@@ -91,7 +91,7 @@ final class MCPGatewayClient {
             "method": "tools/call",
             "params": [
                 "name": toolName,
-                "arguments": arguments,
+                "arguments": arguments.mapValues { $0.toAny() },
             ],
         ]
 
@@ -172,38 +172,72 @@ final class MCPGatewayClient {
     }
 }
 
-// MARK: - AnyCodable (minimal)
+// MARK: - JSONValue
 
-struct AnyCodable: Decodable {
-    let value: Any
+/// JSON-safe value container.
+///
+/// This avoids Swift 6 concurrency warnings that happen when decoding into `Any`
+/// (which is not `Sendable`) and then returning those values across actor boundaries.
+enum JSONValue: Decodable, Sendable {
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([JSONValue])
+    case object([String: JSONValue])
+    case null
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
+
+        if container.decodeNil() {
+            self = .null
+            return
+        }
         if let bool = try? container.decode(Bool.self) {
-            value = bool
+            self = .bool(bool)
             return
         }
         if let int = try? container.decode(Int.self) {
-            value = int
+            self = .int(int)
             return
         }
         if let double = try? container.decode(Double.self) {
-            value = double
+            self = .double(double)
             return
         }
         if let string = try? container.decode(String.self) {
-            value = string
+            self = .string(string)
             return
         }
-        if let array = try? container.decode([AnyCodable].self) {
-            value = array.map { $0.value }
+        if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
             return
         }
-        if let dictionary = try? container.decode([String: AnyCodable].self) {
-            value = dictionary.mapValues { $0.value }
+        if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
             return
         }
-        value = NSNull()
+
+        self = .null
+    }
+
+    func toAny() -> Any {
+        switch self {
+        case .bool(let value):
+            return value
+        case .int(let value):
+            return value
+        case .double(let value):
+            return value
+        case .string(let value):
+            return value
+        case .array(let values):
+            return values.map { $0.toAny() }
+        case .object(let values):
+            return values.mapValues { $0.toAny() }
+        case .null:
+            return NSNull()
+        }
     }
 }
-

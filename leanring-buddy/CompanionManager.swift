@@ -967,7 +967,7 @@ final class CompanionManager: ObservableObject {
                 OpenAICompatibleChatAPI.ToolDefinition(
                     name: tool.name,
                     description: tool.description,
-                    parameters: tool.inputSchema.mapValues { $0.value }
+                    parameters: tool.inputSchema.mapValues { $0.toAny() }
                 )
             }
         }()
@@ -1005,7 +1005,7 @@ final class CompanionManager: ObservableObject {
 
                 for toolCall in toolCalls {
                     let argumentsData = toolCall.function.arguments.data(using: .utf8) ?? Data()
-                    let argumentsObject = (try? JSONSerialization.jsonObject(with: argumentsData)) as? [String: Any] ?? [:]
+                    let argumentsObject = (try? JSONDecoder().decode([String: JSONValue].self, from: argumentsData)) ?? [:]
 
                     let toolResultText = try await mcpGatewayClient.callTool(
                         mcpBaseURL: miroMcpBaseURL,
