@@ -57,6 +57,12 @@ struct CompanionPanelView: View {
 
                 miroIntegrationSection
                     .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 10)
+
+                macToolsSection
+                    .padding(.horizontal, 16)
             }
 
             if !companionManager.allPermissionsGranted {
@@ -936,6 +942,109 @@ struct CompanionPanelView: View {
                         .foregroundColor(DS.Colors.warning)
                 }
             }
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Mac Tools
+
+    private var macToolsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("MAC TOOLS")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(companionManager.macToolsWorkspaceRootPath.isEmpty ? DS.Colors.warning : DS.Colors.success)
+                        .frame(width: 6, height: 6)
+                    Text(companionManager.macToolsWorkspaceRootPath.isEmpty ? "No Folder" : "Ready")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(companionManager.macToolsWorkspaceRootPath.isEmpty ? DS.Colors.warning : DS.Colors.success)
+                }
+            }
+
+            Toggle(isOn: $companionManager.isMacToolsEnabled) {
+                Text("Enable Mac tools")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Workspace folder")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                HStack(spacing: 8) {
+                    Text(companionManager.macToolsWorkspaceRootPath.isEmpty ? "Not set" : companionManager.macToolsWorkspaceRootPath)
+                        .font(.system(size: 11))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                        )
+
+                    Button(action: {
+                        companionManager.promptUserToSelectMacToolsWorkspaceFolder()
+                    }) {
+                        Text("Choose")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(DS.Colors.textOnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(DS.Colors.accent))
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+
+                    if !companionManager.macToolsWorkspaceRootPath.isEmpty {
+                        Button(action: {
+                            companionManager.clearMacToolsWorkspaceFolder()
+                        }) {
+                            Text("Clear")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(DS.Colors.textTertiary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.white.opacity(0.06)))
+                                .overlay(
+                                    Capsule().stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .pointerCursor()
+                    }
+                }
+            }
+
+            Toggle(isOn: $companionManager.isMacToolsFileWriteEnabled) {
+                Text("File write (asks every time)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+            .disabled(!companionManager.isMacToolsEnabled)
+
+            Toggle(isOn: $companionManager.isMacToolsShellEnabled) {
+                Text("Shell (asks every time)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+            .disabled(!companionManager.isMacToolsEnabled)
         }
         .padding(.vertical, 4)
     }

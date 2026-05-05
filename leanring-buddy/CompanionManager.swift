@@ -87,6 +87,32 @@ final class CompanionManager: ObservableObject {
     private static let miroMcpApiKeyKeychainService = "Clicky"
     private static let miroMcpApiKeyKeychainAccount = "miro_mcp_api_key"
 
+    // MARK: - Local Mac Tools
+
+    let macToolsWorkspaceManager = MacToolsWorkspaceManager()
+    private lazy var localMacToolRunner = LocalMacToolRunner(workspaceManager: macToolsWorkspaceManager)
+    private var macToolsWorkspaceCancellable: AnyCancellable?
+
+    @Published var isMacToolsEnabled: Bool = UserDefaults.standard.object(forKey: "isMacToolsEnabled") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(isMacToolsEnabled, forKey: "isMacToolsEnabled")
+        }
+    }
+
+    @Published private(set) var macToolsWorkspaceRootPath: String = ""
+
+    @Published var isMacToolsShellEnabled: Bool = UserDefaults.standard.object(forKey: "macToolsEnableShell") as? Bool ?? false {
+        didSet {
+            localMacToolRunner.setShellEnabled(isMacToolsShellEnabled)
+        }
+    }
+
+    @Published var isMacToolsFileWriteEnabled: Bool = UserDefaults.standard.object(forKey: "macToolsEnableFileWrite") as? Bool ?? false {
+        didSet {
+            localMacToolRunner.setFileWriteEnabled(isMacToolsFileWriteEnabled)
+        }
+    }
+
     private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
         return ElevenLabsTTSClient(proxyURL: "\(Self.workerBaseURL)/tts")
     }()
@@ -96,6 +122,13 @@ final class CompanionManager: ObservableObject {
     /// Conversation history so Claude remembers prior exchanges within a session.
     /// Each entry is the user's transcript and Claude's response.
     private var conversationHistory: [(userTranscript: String, assistantResponse: String)] = []
+
+    init() {
+        macToolsWorkspaceRootPath = macToolsWorkspaceManager.workspaceRootPath
+        macToolsWorkspaceCancellable = macToolsWorkspaceManager.$workspaceRootPath.sink { [weak self] newPath in
+            self?.macToolsWorkspaceRootPath = newPath
+        }
+    }
 
     /// The currently running AI response task, if any. Cancelled when the user
     /// speaks again so a new response can begin immediately.
@@ -222,6 +255,16 @@ final class CompanionManager: ObservableObject {
         selectedChatProvider = chatProvider
         UserDefaults.standard.set(chatProvider.rawValue, forKey: "selectedChatProvider")
         rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+    }
+
+    // MARK: - Mac Tools UI Actions
+
+    func promptUserToSelectMacToolsWorkspaceFolder() {
+        macToolsWorkspaceManager.promptUserToSelectWorkspaceFolder()
+    }
+
+    func clearMacToolsWorkspaceFolder() {
+        macToolsWorkspaceManager.clearWorkspaceFolder()
     }
 
     private func rebuildLocalOpenAICompatibleChatAPIIfNeeded() {
@@ -972,11 +1015,23 @@ final class CompanionManager: ObservableObject {
             }
         }()
 
+        let macTools: [OpenAICompatibleChatAPI.ToolDefinition] = {
+            guard isMacToolsEnabled else { return [] }
+            return localMacToolRunner.toolDefinitions()
+        }()
+
+        let toolsForRequest: [OpenAICompatibleChatAPI.ToolDefinition]? = {
+            var tools: [OpenAICompatibleChatAPI.ToolDefinition] = []
+            if let miroTools { tools.append(contentsOf: miroTools) }
+            tools.append(contentsOf: macTools)
+            return tools.isEmpty ? nil : tools
+        }()
+
         // Tool loop: let the model call tools, then feed results back.
         for _ in 0..<6 {
             let assistantMessage = try await localOpenAICompatibleChatAPI.createChatCompletionNonStreaming(
                 messages: messages,
-                tools: miroTools
+                tools: toolsForRequest
             )
 
             if let toolCalls = assistantMessage.tool_calls, !toolCalls.isEmpty {
@@ -1007,12 +1062,22 @@ final class CompanionManager: ObservableObject {
                     let argumentsData = toolCall.function.arguments.data(using: .utf8) ?? Data()
                     let argumentsObject = (try? JSONDecoder().decode([String: JSONValue].self, from: argumentsData)) ?? [:]
 
-                    let toolResultText = try await mcpGatewayClient.callTool(
-                        mcpBaseURL: miroMcpBaseURL,
-                        apiKey: trimmedApiKey,
+                    let toolResultText: String
+                    if let localResult = try await localMacToolRunner.handleToolCall(
                         toolName: toolCall.function.name,
                         arguments: argumentsObject
-                    )
+                    ) {
+                        toolResultText = localResult
+                    } else if miroTools?.contains(where: { $0.name == toolCall.function.name }) == true {
+                        toolResultText = try await mcpGatewayClient.callTool(
+                            mcpBaseURL: miroMcpBaseURL,
+                            apiKey: trimmedApiKey,
+                            toolName: toolCall.function.name,
+                            arguments: argumentsObject
+                        )
+                    } else {
+                        toolResultText = "Unknown tool: \(toolCall.function.name)"
+                    }
 
                     messages.append([
                         "role": "tool",
