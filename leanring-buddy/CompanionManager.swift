@@ -728,6 +728,13 @@ final class CompanionManager: ObservableObject {
     miro tools:
     if the user is working in miro and asks you to create or edit board content, prefer using miro tools instead of telling them to click around. for example: create sticky notes, frames, text, connectors, and search/list board items. if you need a board id and you can't infer it from context, ask the user for the board url or id.
 
+    mac tools:
+    if mac tools are enabled, you can use tools to help the user by inspecting and operating on their mac. be careful and practical.
+    - use fs_list_dir and fs_read_file to understand code in the selected workspace folder.
+    - only use fs_write_file or shell_run when it's clearly needed. the app will ask the user to allow each action.
+    - use shortcuts_run when the user already has an automation set up in the shortcuts app; it's the safest way to do multi-step mac actions.
+    - you can use clipboard_get and clipboard_set when it helps move text around quickly, but don't overwrite the clipboard unless the user asked for it.
+
     element pointing:
     you have a small blue triangle cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
 
