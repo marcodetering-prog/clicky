@@ -35,6 +35,22 @@ Add these GitHub Actions secrets:
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
 
+To create the **Developer ID Application** certificate:
+1. Open Xcode → Settings → Accounts
+2. Select your Apple ID and team
+3. “Manage Certificates…” → `+` → “Developer ID Application”
+4. Confirm you now see “Developer ID Application” in Keychain Access
+
+To export it to a `.p12`:
+1. Open Keychain Access → “My Certificates”
+2. Find “Developer ID Application: …”
+3. Right click → Export → `.p12` (set a strong password)
+4. Base64 encode the file:
+
+```bash
+base64 -i /path/to/certificate.p12 | pbcopy
+```
+
 ## Release
 
 Create and push a tag:
@@ -47,4 +63,3 @@ git push origin v1.0.1
 
 GitHub Actions builds a notarized `Clicky-<version>.zip`, generates a signed `appcast.xml`,
 and attaches both to the GitHub Release.
-
