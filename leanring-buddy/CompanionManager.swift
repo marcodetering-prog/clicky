@@ -91,7 +91,6 @@ final class CompanionManager: ObservableObject {
 
     let macToolsWorkspaceManager = MacToolsWorkspaceManager()
     private lazy var localMacToolRunner = LocalMacToolRunner(workspaceManager: macToolsWorkspaceManager)
-    private var macToolsWorkspaceCancellable: AnyCancellable?
 
     @Published var isMacToolsEnabled: Bool = UserDefaults.standard.object(forKey: "isMacToolsEnabled") as? Bool ?? false {
         didSet {
@@ -131,9 +130,6 @@ final class CompanionManager: ObservableObject {
 
     init() {
         macToolsWorkspaceRootPath = macToolsWorkspaceManager.workspaceRootPath
-        macToolsWorkspaceCancellable = macToolsWorkspaceManager.$workspaceRootPath.sink { [weak self] newPath in
-            self?.macToolsWorkspaceRootPath = newPath
-        }
     }
 
     /// The currently running AI response task, if any. Cancelled when the user
@@ -267,10 +263,12 @@ final class CompanionManager: ObservableObject {
 
     func promptUserToSelectMacToolsWorkspaceFolder() {
         macToolsWorkspaceManager.promptUserToSelectWorkspaceFolder()
+        macToolsWorkspaceRootPath = macToolsWorkspaceManager.workspaceRootPath
     }
 
     func clearMacToolsWorkspaceFolder() {
         macToolsWorkspaceManager.clearWorkspaceFolder()
+        macToolsWorkspaceRootPath = macToolsWorkspaceManager.workspaceRootPath
     }
 
     private func rebuildLocalOpenAICompatibleChatAPIIfNeeded() {

@@ -2,10 +2,10 @@ import AppKit
 import Foundation
 
 @MainActor
-final class MacToolsWorkspaceManager: ObservableObject {
+final class MacToolsWorkspaceManager {
     private let workspaceRootDefaultsKey = "macToolsWorkspaceRootPath"
 
-    @Published private(set) var workspaceRootPath: String
+    private(set) var workspaceRootPath: String
 
     init() {
         workspaceRootPath = UserDefaults.standard.string(forKey: workspaceRootDefaultsKey) ?? ""
@@ -85,4 +85,3 @@ final class MacToolsWorkspaceManager: ObservableObject {
         UserDefaults.standard.set(path, forKey: workspaceRootDefaultsKey)
     }
 }
-

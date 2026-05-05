@@ -111,8 +111,9 @@ final class MenuBarPanelManager: NSObject {
     /// Opens the panel automatically on app launch so the user sees
     /// permissions and the start button right away.
     func showPanelOnLaunch() {
-        // Small delay so the status item has time to appear in the menu bar
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        Task { @MainActor in
+            // Small delay so the status item has time to appear in the menu bar.
+            try? await Task.sleep(nanoseconds: 300_000_000)
             self.showPanel()
         }
     }
@@ -210,18 +211,18 @@ final class MenuBarPanelManager: NSObject {
         clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
-            guard let self, let panel = self.panel else { return }
+            Task { @MainActor in
+                guard let self, let panel = self.panel else { return }
 
-            // Check if the click is inside the status item button — if so, the
-            // statusItemClicked handler will toggle the panel, so don't also hide.
-            let clickLocation = NSEvent.mouseLocation
-            if panel.frame.contains(clickLocation) {
-                return
-            }
+                // Check if the click is inside the panel — if so, do nothing.
+                let clickLocation = NSEvent.mouseLocation
+                if panel.frame.contains(clickLocation) {
+                    return
+                }
 
-            // Delay dismissal slightly to avoid closing the panel when
-            // a system permission dialog appears (e.g. microphone access).
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                // Delay dismissal slightly to avoid closing the panel when
+                // a system permission dialog appears (e.g. microphone access).
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 guard panel.isVisible else { return }
 
                 // If permissions aren't all granted yet, a system dialog
