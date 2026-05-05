@@ -21,6 +21,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Detect release mode
+        id: mode
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          SHOULD_SIGN_AND_NOTARIZE="false"
+          if [[ -n "${MACOS_CERTIFICATE_P12_BASE64}" \
+             && -n "${MACOS_CERTIFICATE_P12_PASSWORD}" \
+             && -n "${APPLE_TEAM_ID}" \
+             && -n "${APPLE_ID}" \
+             && -n "${APPLE_APP_SPECIFIC_PASSWORD}" ]]; then
+            SHOULD_SIGN_AND_NOTARIZE="true"
+          fi
+
+          HAS_SPARKLE_KEY="false"
+          if [[ -n "${SPARKLE_ED25519_PRIVATE_KEY}" ]]; then
+            HAS_SPARKLE_KEY="true"
+          fi
+
+          echo "signed_and_notarized=${SHOULD_SIGN_AND_NOTARIZE}" >> "${GITHUB_OUTPUT}"
+          echo "has_sparkle_key=${HAS_SPARKLE_KEY}" >> "${GITHUB_OUTPUT}"
+
       - name: Resolve version
         id: version
         run: |
@@ -40,6 +69,7 @@ jobs:
           scripts/sparkle/download_sparkle_tools.sh >/dev/null
 
       - name: Import signing certificate
+        if: steps.mode.outputs.signed_and_notarized == 'true'
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           MACOS_CERTIFICATE_P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_P12_PASSWORD }}
@@ -62,6 +92,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
 
       - name: Build archive
+        if: steps.mode.outputs.signed_and_notarized == 'true'
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
@@ -81,6 +112,7 @@ jobs:
             archive
 
       - name: Export app
+        if: steps.mode.outputs.signed_and_notarized == 'true'
         run: |
           set -euo pipefail
 
@@ -106,18 +138,48 @@ jobs:
 
           ls -la "${EXPORT_DIR}"
 
+      - name: Build app (unsigned mode)
+        if: steps.mode.outputs.signed_and_notarized != 'true'
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_NUMBER="${{ steps.version.outputs.build_number }}"
+
+          xcodebuild -resolvePackageDependencies -scheme "${SCHEME}"
+
+          DERIVED_DATA_PATH="${RUNNER_TEMP}/DerivedData"
+          xcodebuild \
+            -scheme "${SCHEME}" \
+            -configuration "${CONFIGURATION}" \
+            -derivedDataPath "${DERIVED_DATA_PATH}" \
+            MARKETING_VERSION="${VERSION}" \
+            CURRENT_PROJECT_VERSION="${BUILD_NUMBER}" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+          APP_PATH="${DERIVED_DATA_PATH}/Build/Products/${CONFIGURATION}/${APP_NAME}.app"
+          if [[ ! -d "${APP_PATH}" ]]; then
+            echo "Expected app at ${APP_PATH} but it does not exist"
+            ls -la "${DERIVED_DATA_PATH}/Build/Products/${CONFIGURATION}" || true
+            exit 1
+          fi
+
+          EXPORT_DIR="${RUNNER_TEMP}/export"
+          mkdir -p "${EXPORT_DIR}"
+          ditto "${APP_PATH}" "${EXPORT_DIR}/${APP_NAME}.app"
+
       - name: Prepare Sparkle signing key
+        if: steps.mode.outputs.has_sparkle_key == 'true'
         env:
           SPARKLE_ED25519_PRIVATE_KEY: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          if [[ -z "${SPARKLE_ED25519_PRIVATE_KEY}" ]]; then
-            echo "Missing SPARKLE_ED25519_PRIVATE_KEY secret"
-            exit 1
-          fi
           echo "${SPARKLE_ED25519_PRIVATE_KEY}" > "${RUNNER_TEMP}/sparkle_ed25519_private_key.txt"
 
       - name: Notarize + staple
+        if: steps.mode.outputs.signed_and_notarized == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -161,10 +223,13 @@ jobs:
 
           DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${APP_NAME}-${VERSION}.zip"
 
-          ED_KEY_FILE="${RUNNER_TEMP}/sparkle_ed25519_private_key.txt" \
-            scripts/sparkle/make_appcast.sh "${VERSION}" "${BUILD_NUMBER}" "${UPDATE_ZIP}" "${DOWNLOAD_URL}" >/dev/null
-
-          cp appcast.xml "${DIST_DIR}/appcast.xml"
+          if [[ "${{ steps.mode.outputs.has_sparkle_key }}" == "true" ]]; then
+            ED_KEY_FILE="${RUNNER_TEMP}/sparkle_ed25519_private_key.txt" \
+              scripts/sparkle/make_appcast.sh "${VERSION}" "${BUILD_NUMBER}" "${UPDATE_ZIP}" "${DOWNLOAD_URL}" >/dev/null
+            cp appcast.xml "${DIST_DIR}/appcast.xml"
+          else
+            echo "Warning: SPARKLE_ED25519_PRIVATE_KEY not configured. Publishing zip without appcast.xml."
+          fi
 
           echo "dist contents:"
           ls -la "${DIST_DIR}"
@@ -176,4 +241,3 @@ jobs:
           files: |
             ${{ runner.temp }}/dist/*.zip
             ${{ runner.temp }}/dist/appcast.xml
-
