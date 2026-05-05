@@ -904,6 +904,22 @@ final class CompanionManager: ObservableObject {
             "content": Self.companionVoiceResponseSystemPrompt,
         ])
 
+        if isMiroToolsEnabled, hasMiroMcpApiKeyConfigured {
+            if let activeTabURLString = ActiveBrowserURLDetector.getFrontmostBrowserActiveTabURLString(),
+               let miroBoardID = MiroBoardContextDetector.extractMiroBoardID(from: activeTabURLString) {
+                messages.append([
+                    "role": "system",
+                    "content": "miro context: active_tab_url=\(activeTabURLString) inferred_board_id=\(miroBoardID). when calling miro tools, use this inferred_board_id unless the user specifies a different board.",
+                ])
+            } else if let activeTabURLString = ActiveBrowserURLDetector.getFrontmostBrowserActiveTabURLString(),
+                      activeTabURLString.lowercased().contains("miro.com") {
+                messages.append([
+                    "role": "system",
+                    "content": "miro context: active_tab_url=\(activeTabURLString). if you need a board id for a miro tool call and you can't infer it, ask the user for the board url or id.",
+                ])
+            }
+        }
+
         for (userPlaceholder, assistantResponse) in historyForAPI {
             messages.append(["role": "user", "content": userPlaceholder])
             messages.append(["role": "assistant", "content": assistantResponse])

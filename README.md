@@ -170,6 +170,7 @@ In the app panel:
 1. Set `Miro` → enable “Enable Miro tools”
 2. Set `MCP URL` (example: `https://mcp.ericai.dev/chatgpt/mcp/miro`)
 3. Paste your MCP API key and click `Save` (stored in Keychain)
+4. Optional: Clicky will try to auto-detect the active Miro board from your frontmost browser tab URL (may prompt for Automation/Apple Events permission)
 
 ## Project structure
 
