@@ -2,7 +2,12 @@ worker/node_modules/
 worker/.dev.vars
 .DS_Store
 *.xcuserstate
+*.xcuserdatad/
+xcuserdata/
 build/
 releases/
 .claude/
 coding-plans/
+sparkle_private_key*.txt
+*.p12
+sparkle_tools/

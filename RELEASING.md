@@ -1,0 +1,50 @@
+# Releasing Clicky (GitHub Releases + Sparkle auto-update)
+
+Clicky uses **Sparkle** for auto-updates. Releases are published via **GitHub Releases** and the app downloads the signed feed from:
+
+`https://github.com/marcodetering-prog/clicky/releases/latest/download/appcast.xml`
+
+## One-time setup
+
+### 1) Sparkle EdDSA keys
+
+The app must embed the public key in `leanring-buddy/Info.plist` (`SUPublicEDKey`).
+
+Generate + export the private key (run locally on your Mac):
+
+```bash
+cd /Users/marcodetering/clicky
+scripts/sparkle/download_sparkle_tools.sh >/dev/null
+
+# Uses Keychain. Creates the key under the "clicky" account and exports it to a file.
+sparkle_tools/2.9.1/bin/generate_keys --account clicky
+sparkle_tools/2.9.1/bin/generate_keys --account clicky -x sparkle_private_key_clicky.txt
+```
+
+Then add the file contents of `sparkle_private_key_clicky.txt` to a GitHub Actions secret:
+- `SPARKLE_ED25519_PRIVATE_KEY`
+
+Do **not** commit the private key.
+
+### 2) Apple Developer signing + notarization secrets
+
+Add these GitHub Actions secrets:
+- `MACOS_CERTIFICATE_P12_BASE64` (base64-encoded `.p12` for **Developer ID Application**)
+- `MACOS_CERTIFICATE_P12_PASSWORD`
+- `APPLE_TEAM_ID`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+
+## Release
+
+Create and push a tag:
+
+```bash
+cd /Users/marcodetering/clicky
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+GitHub Actions builds a notarized `Clicky-<version>.zip`, generates a signed `appcast.xml`,
+and attaches both to the GitHub Release.
+

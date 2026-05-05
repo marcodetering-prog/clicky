@@ -24,8 +24,14 @@ final class AssemblyAIStreamingTranscriptionProvider: BuddyTranscriptionProvider
     let displayName = "AssemblyAI"
     let requiresSpeechRecognitionPermission = false
 
-    var isConfigured: Bool { true }
-    var unavailableExplanation: String? { nil }
+    var isConfigured: Bool {
+        !Self.tokenProxyURL.contains("your-worker-name.your-subdomain.workers.dev")
+    }
+
+    var unavailableExplanation: String? {
+        guard !isConfigured else { return nil }
+        return "AssemblyAI transcription is not configured. Set your Cloudflare Worker base URL in the code and deploy it."
+    }
 
     /// Single long-lived URLSession shared across all streaming sessions.
     /// Creating and invalidating a URLSession per session corrupts the OS

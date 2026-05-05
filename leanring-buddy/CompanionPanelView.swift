@@ -29,7 +29,25 @@ struct CompanionPanelView: View {
                 Spacer()
                     .frame(height: 12)
 
-                modelPickerRow
+                chatProviderPickerRow
+                    .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 10)
+
+                chatBackendConfigurationSection
+                    .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 10)
+
+                voiceOutputPickerRow
+                    .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 10)
+
+                speechToTextProviderPickerRow
                     .padding(.horizontal, 16)
             }
 
@@ -574,7 +592,7 @@ struct CompanionPanelView: View {
         .padding(.vertical, 4)
     }
 
-    private var speechToTextProviderRow: some View {
+    private var speechToTextProviderPickerRow: some View {
         HStack {
             HStack(spacing: 8) {
                 Image(systemName: "mic.badge.waveform")
@@ -589,26 +607,10 @@ struct CompanionPanelView: View {
 
             Spacer()
 
-            Text(companionManager.buddyDictationManager.transcriptionProviderDisplayName)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(DS.Colors.textTertiary)
-        }
-        .padding(.vertical, 4)
-    }
-
-    // MARK: - Model Picker
-
-    private var modelPickerRow: some View {
-        HStack {
-            Text("Model")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(DS.Colors.textSecondary)
-
-            Spacer()
-
             HStack(spacing: 0) {
-                modelOptionButton(label: "Sonnet", modelID: "claude-sonnet-4-6")
-                modelOptionButton(label: "Opus", modelID: "claude-opus-4-6")
+                transcriptionProviderOptionButton(label: "Apple", providerRawValue: "apple")
+                transcriptionProviderOptionButton(label: "OpenAI", providerRawValue: "openai")
+                transcriptionProviderOptionButton(label: "AssemblyAI", providerRawValue: "assemblyai")
             }
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -622,7 +624,154 @@ struct CompanionPanelView: View {
         .padding(.vertical, 4)
     }
 
-    private func modelOptionButton(label: String, modelID: String) -> some View {
+    private func transcriptionProviderOptionButton(label: String, providerRawValue: String) -> some View {
+        let normalizedProviderRawValue = providerRawValue.lowercased()
+        let isSelected = companionManager.buddyDictationManager.preferredTranscriptionProviderRawValue == normalizedProviderRawValue
+        let isConfigured = BuddyTranscriptionProviderFactory.isProviderConfigured(preferredProviderRawValue: normalizedProviderRawValue)
+
+        return Button(action: {
+            companionManager.buddyDictationManager.setPreferredTranscriptionProviderRawValue(normalizedProviderRawValue)
+        }) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .disabled(!isConfigured)
+    }
+
+    // MARK: - Chat Backend Picker
+
+    private var chatProviderPickerRow: some View {
+        HStack {
+            Text("Backend")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                chatProviderOptionButton(label: "Claude", provider: .claude)
+                chatProviderOptionButton(label: "Local", provider: .localOpenAICompatible)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var voiceOutputPickerRow: some View {
+        HStack {
+            Text("Voice")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                voiceOutputOptionButton(label: "ElevenLabs", provider: .elevenLabs)
+                voiceOutputOptionButton(label: "System", provider: .system)
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func voiceOutputOptionButton(label: String, provider: CompanionManager.VoiceOutputProvider) -> some View {
+        let isSelected = companionManager.selectedVoiceOutputProvider == provider
+        return Button(action: {
+            companionManager.setSelectedVoiceOutputProvider(provider)
+        }) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    private func chatProviderOptionButton(label: String, provider: CompanionManager.ChatProvider) -> some View {
+        let isSelected = companionManager.selectedChatProvider == provider
+        return Button(action: {
+            companionManager.setSelectedChatProvider(provider)
+        }) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isSelected ? DS.Colors.textPrimary : DS.Colors.textTertiary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(isSelected ? Color.white.opacity(0.1) : Color.clear)
+                )
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+    }
+
+    @ViewBuilder
+    private var chatBackendConfigurationSection: some View {
+        switch companionManager.selectedChatProvider {
+        case .claude:
+            claudeModelPickerRow
+        case .localOpenAICompatible:
+            localOpenAICompatibleConfigurationSection
+        }
+    }
+
+    // MARK: - Claude Model Picker
+
+    private var claudeModelPickerRow: some View {
+        HStack {
+            Text("Model")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+
+            Spacer()
+
+            HStack(spacing: 0) {
+                claudeModelOptionButton(label: "Sonnet", modelID: "claude-sonnet-4-6")
+                claudeModelOptionButton(label: "Opus", modelID: "claude-opus-4-6")
+            }
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+            )
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func claudeModelOptionButton(label: String, modelID: String) -> some View {
         let isSelected = companionManager.selectedModel == modelID
         return Button(action: {
             companionManager.setSelectedModel(modelID)
@@ -639,6 +788,60 @@ struct CompanionPanelView: View {
         }
         .buttonStyle(.plain)
         .pointerCursor()
+    }
+
+    // MARK: - Local LLM Settings
+
+    private var localOpenAICompatibleConfigurationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LOCAL LLM")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(DS.Colors.textTertiary)
+
+            localLLMTextFieldRow(
+                label: "Base URL",
+                placeholder: "http://localhost:11434",
+                text: $companionManager.localOpenAICompatibleBaseURL
+            )
+
+            localLLMTextFieldRow(
+                label: "Model",
+                placeholder: "qwen3.5:9b",
+                text: $companionManager.localOpenAICompatibleModel
+            )
+
+            Toggle(isOn: $companionManager.includeScreenshotsInLocalChatRequests) {
+                Text("Include screenshots")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+            .padding(.top, 2)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func localLLMTextFieldRow(label: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
+
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(DS.Colors.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                )
+        }
     }
 
     // MARK: - DM Farza Button

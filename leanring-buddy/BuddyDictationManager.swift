@@ -233,6 +233,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
     )
     @Published private(set) var microphoneButtonRecordingStartedAt: Date?
     @Published private(set) var transcriptionProviderDisplayName = ""
+    @Published private(set) var preferredTranscriptionProviderRawValue: String = ""
     @Published var lastErrorMessage: String?
     @Published private(set) var currentPermissionProblem: BuddyDictationPermissionProblem?
 
@@ -262,7 +263,7 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         return AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
     }
 
-    private let transcriptionProvider: any BuddyTranscriptionProvider
+    private var transcriptionProvider: any BuddyTranscriptionProvider
     private let audioEngine = AVAudioEngine()
     private var activeTranscriptionSession: (any BuddyStreamingTranscriptionSession)?
     private var activeStartSource: BuddyDictationStartSource?
@@ -281,10 +282,40 @@ final class BuddyDictationManager: NSObject, ObservableObject {
     private var lastPermissionRequestCompletedAt: Date?
 
     override init() {
-        let transcriptionProvider = BuddyTranscriptionProviderFactory.makeDefaultProvider()
+        let preferredProviderRawValue = (
+            UserDefaults.standard.string(forKey: "preferredVoiceTranscriptionProvider")
+                ?? AppBundleConfiguration.stringValue(forKey: "VoiceTranscriptionProvider")
+                ?? "apple"
+        ).lowercased()
+
+        self.preferredTranscriptionProviderRawValue = preferredProviderRawValue
+
+        let transcriptionProvider = BuddyTranscriptionProviderFactory.makeProvider(
+            preferredProviderRawValue: preferredProviderRawValue
+        )
+
         self.transcriptionProvider = transcriptionProvider
         self.transcriptionProviderDisplayName = transcriptionProvider.displayName
         super.init()
+    }
+
+    func setPreferredTranscriptionProviderRawValue(_ preferredProviderRawValue: String) {
+        let normalizedPreferredProviderRawValue = preferredProviderRawValue.lowercased()
+
+        // Stop any active dictation session before swapping providers.
+        cancelCurrentDictation(preserveDraftText: true)
+
+        UserDefaults.standard.set(normalizedPreferredProviderRawValue, forKey: "preferredVoiceTranscriptionProvider")
+        self.preferredTranscriptionProviderRawValue = normalizedPreferredProviderRawValue
+
+        let newProvider = BuddyTranscriptionProviderFactory.makeProvider(
+            preferredProviderRawValue: normalizedPreferredProviderRawValue
+        )
+
+        transcriptionProvider = newProvider
+        transcriptionProviderDisplayName = newProvider.displayName
+        lastErrorMessage = nil
+        currentPermissionProblem = nil
     }
 
     func updateContextualKeyterms(_ contextualKeyterms: [String]) {

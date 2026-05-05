@@ -72,13 +72,22 @@ final class CompanionManager: ObservableObject {
     /// through this so keys never ship in the app binary.
     private static let workerBaseURL = "https://your-worker-name.your-subdomain.workers.dev"
 
+    enum ChatProvider: String, CaseIterable {
+        case claude
+        case localOpenAICompatible
+    }
+
     private lazy var claudeAPI: ClaudeAPI = {
         return ClaudeAPI(proxyURL: "\(Self.workerBaseURL)/chat", model: selectedModel)
     }()
 
+    private var localOpenAICompatibleChatAPI: OpenAICompatibleChatAPI?
+
     private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
         return ElevenLabsTTSClient(proxyURL: "\(Self.workerBaseURL)/tts")
     }()
+
+    private let systemTTSClient = SystemTTSClient()
 
     /// Conversation history so Claude remembers prior exchanges within a session.
     /// Each entry is the user's transcript and Claude's response.
@@ -110,10 +119,85 @@ final class CompanionManager: ObservableObject {
     /// The Claude model used for voice responses. Persisted to UserDefaults.
     @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
 
+    enum VoiceOutputProvider: String, CaseIterable {
+        case elevenLabs
+        case system
+    }
+
+    @Published var selectedVoiceOutputProvider: VoiceOutputProvider = {
+        let persistedValue = UserDefaults.standard.string(forKey: "selectedVoiceOutputProvider") ?? VoiceOutputProvider.system.rawValue
+        return VoiceOutputProvider(rawValue: persistedValue) ?? .system
+    }()
+
+    /// Which backend is used for the screenshot+transcript chat request.
+    @Published var selectedChatProvider: ChatProvider = {
+        let persistedValue = UserDefaults.standard.string(forKey: "selectedChatProvider") ?? ChatProvider.localOpenAICompatible.rawValue
+        return ChatProvider(rawValue: persistedValue) ?? .localOpenAICompatible
+    }()
+
+    /// Local/self-hosted OpenAI-compatible server base URL (not the full /v1/chat/completions path).
+    @Published var localOpenAICompatibleBaseURL: String = UserDefaults.standard.string(forKey: "localOpenAICompatibleBaseURL") ?? "http://ai-coder:11434" {
+        didSet {
+            UserDefaults.standard.set(localOpenAICompatibleBaseURL, forKey: "localOpenAICompatibleBaseURL")
+            rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+        }
+    }
+
+    /// Local/self-hosted OpenAI-compatible model id.
+    @Published var localOpenAICompatibleModel: String = UserDefaults.standard.string(forKey: "localOpenAICompatibleModel") ?? "qwen3.5:9b" {
+        didSet {
+            UserDefaults.standard.set(localOpenAICompatibleModel, forKey: "localOpenAICompatibleModel")
+            rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+        }
+    }
+
+    /// Optional API key for OpenAI-compatible providers. Many local servers ignore this.
+    @Published var localOpenAICompatibleAPIKey: String = UserDefaults.standard.string(forKey: "localOpenAICompatibleAPIKey") ?? "" {
+        didSet {
+            UserDefaults.standard.set(localOpenAICompatibleAPIKey, forKey: "localOpenAICompatibleAPIKey")
+            rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+        }
+    }
+
+    /// Whether to send screenshots along with the transcript when using a local LLM.
+    /// (Requires a vision-capable model + server. For example, Ollama's Qwen3.5:9b can accept images.)
+    @Published var includeScreenshotsInLocalChatRequests: Bool = UserDefaults.standard.object(forKey: "includeScreenshotsInLocalChatRequests") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(includeScreenshotsInLocalChatRequests, forKey: "includeScreenshotsInLocalChatRequests")
+        }
+    }
+
     func setSelectedModel(_ model: String) {
         selectedModel = model
         UserDefaults.standard.set(model, forKey: "selectedClaudeModel")
         claudeAPI.model = model
+    }
+
+    func setSelectedVoiceOutputProvider(_ voiceOutputProvider: VoiceOutputProvider) {
+        selectedVoiceOutputProvider = voiceOutputProvider
+        UserDefaults.standard.set(voiceOutputProvider.rawValue, forKey: "selectedVoiceOutputProvider")
+    }
+
+    func setSelectedChatProvider(_ chatProvider: ChatProvider) {
+        selectedChatProvider = chatProvider
+        UserDefaults.standard.set(chatProvider.rawValue, forKey: "selectedChatProvider")
+        rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+    }
+
+    private func rebuildLocalOpenAICompatibleChatAPIIfNeeded() {
+        guard selectedChatProvider == .localOpenAICompatible else { return }
+
+        let trimmedModel = localOpenAICompatibleModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        let modelToUse = trimmedModel.isEmpty ? "qwen3.5:9b" : trimmedModel
+
+        let trimmedAPIKey = localOpenAICompatibleAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKeyToUse = trimmedAPIKey.isEmpty ? nil : trimmedAPIKey
+
+        localOpenAICompatibleChatAPI = OpenAICompatibleChatAPI(
+            openAICompatibleBaseURL: localOpenAICompatibleBaseURL,
+            apiKey: apiKeyToUse,
+            model: modelToUse
+        )
     }
 
     /// User preference for whether the Clicky cursor should be shown.
@@ -585,7 +669,7 @@ final class CompanionManager: ObservableObject {
     /// the buddy to fly to that element on screen.
     private func sendTranscriptToClaudeWithScreenshot(transcript: String) {
         currentResponseTask?.cancel()
-        elevenLabsTTSClient.stopPlayback()
+        stopAllSpeechPlayback()
 
         currentResponseTask = Task {
             // Stay in processing (spinner) state — no streaming text displayed
@@ -600,24 +684,26 @@ final class CompanionManager: ObservableObject {
                 // Build image labels with the actual screenshot pixel dimensions
                 // so Claude's coordinate space matches the image it sees. We
                 // scale from screenshot pixels to display points ourselves.
-                let labeledImages = screenCaptures.map { capture in
-                    let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
-                    return (data: capture.imageData, label: capture.label + dimensionInfo)
-                }
+                let labeledImages: [(data: Data, label: String)] = {
+                    if selectedChatProvider == .localOpenAICompatible && !includeScreenshotsInLocalChatRequests {
+                        return []
+                    }
+
+                    return screenCaptures.map { capture in
+                        let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
+                        return (data: capture.imageData, label: capture.label + dimensionInfo)
+                    }
+                }()
 
                 // Pass conversation history so Claude remembers prior exchanges
                 let historyForAPI = conversationHistory.map { entry in
                     (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
                 }
 
-                let (fullResponseText, _) = try await claudeAPI.analyzeImageStreaming(
-                    images: labeledImages,
-                    systemPrompt: Self.companionVoiceResponseSystemPrompt,
-                    conversationHistory: historyForAPI,
-                    userPrompt: transcript,
-                    onTextChunk: { _ in
-                        // No streaming text display — spinner stays until TTS plays
-                    }
+                let (fullResponseText, _) = try await analyzeScreensWithSelectedChatProvider(
+                    labeledImages: labeledImages,
+                    historyForAPI: historyForAPI,
+                    userPrompt: transcript
                 )
 
                 guard !Task.isCancelled else { return }
@@ -701,9 +787,7 @@ final class CompanionManager: ObservableObject {
                 // until the audio actually starts playing, then switch to responding.
                 if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     do {
-                        try await elevenLabsTTSClient.speakText(spokenText)
-                        // speakText returns after player.play() — audio is now playing
-                        voiceState = .responding
+                        try await speakResponseText(spokenText)
                     } catch {
                         ClickyAnalytics.trackTTSError(error: error.localizedDescription)
                         print("⚠️ ElevenLabs TTS error: \(error)")
@@ -725,6 +809,47 @@ final class CompanionManager: ObservableObject {
         }
     }
 
+    private func analyzeScreensWithSelectedChatProvider(
+        labeledImages: [(data: Data, label: String)],
+        historyForAPI: [(userPlaceholder: String, assistantResponse: String)],
+        userPrompt: String
+    ) async throws -> (text: String, duration: TimeInterval) {
+        switch selectedChatProvider {
+        case .claude:
+            return try await claudeAPI.analyzeImageStreaming(
+                images: labeledImages,
+                systemPrompt: Self.companionVoiceResponseSystemPrompt,
+                conversationHistory: historyForAPI,
+                userPrompt: userPrompt,
+                onTextChunk: { _ in
+                    // No streaming text display — spinner stays until TTS plays
+                }
+            )
+        case .localOpenAICompatible:
+            if localOpenAICompatibleChatAPI == nil {
+                rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+            }
+
+            guard let localOpenAICompatibleChatAPI else {
+                throw NSError(
+                    domain: "CompanionManager",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Local LLM is not configured yet."]
+                )
+            }
+
+            return try await localOpenAICompatibleChatAPI.analyzeImageStreaming(
+                images: labeledImages,
+                systemPrompt: Self.companionVoiceResponseSystemPrompt,
+                conversationHistory: historyForAPI,
+                userPrompt: userPrompt,
+                onTextChunk: { _ in
+                    // No streaming text display — spinner stays until TTS plays
+                }
+            )
+        }
+    }
+
     /// If the cursor is in transient mode (user toggled "Show Clicky" off),
     /// waits for TTS playback and any pointing animation to finish, then
     /// fades out the overlay after a 1-second pause. Cancelled automatically
@@ -735,7 +860,7 @@ final class CompanionManager: ObservableObject {
         transientHideTask?.cancel()
         transientHideTask = Task {
             // Wait for TTS audio to finish playing
-            while elevenLabsTTSClient.isPlaying {
+            while isAnySpeechPlaybackActive {
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 guard !Task.isCancelled else { return }
             }
@@ -760,9 +885,29 @@ final class CompanionManager: ObservableObject {
     /// ElevenLabs is down.
     private func speakCreditsErrorFallback() {
         let utterance = "I'm all out of credits. Please DM Farza and tell him to bring me back to life."
-        let synthesizer = NSSpeechSynthesizer()
-        synthesizer.startSpeaking(utterance)
+        systemTTSClient.speakText(utterance)
         voiceState = .responding
+    }
+
+    private var isAnySpeechPlaybackActive: Bool {
+        elevenLabsTTSClient.isPlaying || systemTTSClient.isPlaying
+    }
+
+    private func stopAllSpeechPlayback() {
+        elevenLabsTTSClient.stopPlayback()
+        systemTTSClient.stopPlayback()
+    }
+
+    private func speakResponseText(_ spokenText: String) async throws {
+        switch selectedVoiceOutputProvider {
+        case .elevenLabs:
+            try await elevenLabsTTSClient.speakText(spokenText)
+            // speakText returns after player.play() — audio is now playing
+            voiceState = .responding
+        case .system:
+            systemTTSClient.speakText(spokenText)
+            voiceState = .responding
+        }
     }
 
     // MARK: - Point Tag Parsing

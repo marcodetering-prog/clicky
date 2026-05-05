@@ -139,6 +139,29 @@ If you want the full technical breakdown, read `CLAUDE.md`. But here's the short
 
 **Menu bar app** (no dock icon) with two `NSPanel` windows — one for the control panel dropdown, one for the full-screen transparent cursor overlay. Push-to-talk streams audio over a websocket to AssemblyAI, sends the transcript + screenshot to Claude via streaming SSE, and plays the response through ElevenLabs TTS. Claude can embed `[POINT:x,y:label:screenN]` tags in its responses to make the cursor fly to specific UI elements across multiple monitors. All three APIs are proxied through a Cloudflare Worker.
 
+## Optional: use a local LLM (Qwen3.5 9B on Ollama, etc.)
+
+The open-source version now supports a **local/self-hosted OpenAI-compatible** chat backend (for example `llama.cpp` `llama-server`).
+
+Notes:
+- Your local server must support `POST /v1/chat/completions` with `stream: true` (SSE).
+- If your model/server supports vision (for example **Ollama** `qwen3.5:9b`), you can turn on **Include screenshots**.
+
+In the app panel (after onboarding):
+1. Set `Backend` → `Local`
+2. Set `Base URL` (example: `http://localhost:11434` or `http://ai-coder:11434`)
+3. Set `Model` (example: `qwen3.5:9b`)
+
+### Optional: local voice output (CPU-only)
+
+If you want the whole experience to work without external TTS, set:
+- `Voice` → `System` (uses macOS built-in text-to-speech)
+
+### Local speech-to-text (CPU-only)
+
+Clicky can transcribe using macOS Speech Recognition:
+- `Speech to Text` → `Apple`
+
 ## Project structure
 
 ```
@@ -160,3 +183,7 @@ CLAUDE.md                # Full architecture doc (agents read this)
 PRs welcome. If you're using Claude Code, it already knows the codebase — just tell it what you want to build and point it at `CLAUDE.md`.
 
 Got feedback? DM me on X [@farzatv](https://x.com/farzatv).
+
+## Shipping updates
+
+See `RELEASING.md` for GitHub Releases + Sparkle auto-update setup.
