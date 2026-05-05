@@ -1045,6 +1045,14 @@ struct CompanionPanelView: View {
             }
             .toggleStyle(.switch)
             .disabled(!companionManager.isMacToolsEnabled)
+
+            Toggle(isOn: $companionManager.isMacToolsAppleScriptEnabled) {
+                Text("AppleScript (asks every time)")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+            .disabled(!companionManager.isMacToolsEnabled)
         }
         .padding(.vertical, 4)
     }

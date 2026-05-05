@@ -19,6 +19,7 @@ final class LocalMacToolRunner {
 
     private let fileWriteEnabledDefaultsKey = "macToolsEnableFileWrite"
     private let shellEnabledDefaultsKey = "macToolsEnableShell"
+    private let appleScriptEnabledDefaultsKey = "macToolsEnableAppleScript"
 
     init(workspaceManager: MacToolsWorkspaceManager) {
         self.workspaceManager = workspaceManager
@@ -38,6 +39,14 @@ final class LocalMacToolRunner {
 
     func setShellEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: shellEnabledDefaultsKey)
+    }
+
+    var isAppleScriptEnabled: Bool {
+        UserDefaults.standard.object(forKey: appleScriptEnabledDefaultsKey) as? Bool ?? false
+    }
+
+    func setAppleScriptEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: appleScriptEnabledDefaultsKey)
     }
 
     func toolDefinitions() -> [OpenAICompatibleChatAPI.ToolDefinition] {
@@ -164,6 +173,17 @@ final class LocalMacToolRunner {
                     "required": ["name"],
                 ]
             ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "applescript_run",
+                description: "Run AppleScript via osascript. Requires user approval. Powerful and potentially dangerous.",
+                parameters: [
+                    "type": "object",
+                    "properties": [
+                        "script": ["type": "string", "description": "AppleScript source code."],
+                    ],
+                    "required": ["script"],
+                ]
+            ),
         ]
     }
 
@@ -191,6 +211,8 @@ final class LocalMacToolRunner {
             return try await handleClipboardSet(arguments: arguments)
         case "shortcuts_run":
             return try await handleShortcutsRun(arguments: arguments)
+        case "applescript_run":
+            return try await handleAppleScriptRun(arguments: arguments)
         default:
             return nil
         }
@@ -408,6 +430,59 @@ final class LocalMacToolRunner {
         guard approved else { throw PermissionError.deniedByUser }
 
         return try await runShortcutsCLI(shortcutName: name, input: input)
+    }
+
+    private func handleAppleScriptRun(arguments: [String: JSONValue]) async throws -> String {
+        guard isAppleScriptEnabled else {
+            throw PermissionError.toolDisabled("AppleScript is disabled. Enable “AppleScript” in Clicky → Mac Tools.")
+        }
+
+        let script = arguments["script"]?.stringValue ?? ""
+        let preview = String(script.prefix(800))
+
+        let approved = approvalPresenter.requestApproval(
+            title: "Clicky wants to run AppleScript",
+            message: "Allow Clicky to run this AppleScript?",
+            details: preview + (script.count > preview.count ? "\n…(truncated preview)" : "")
+        )
+        guard approved else { throw PermissionError.deniedByUser }
+
+        return try await runAppleScript(script: script)
+    }
+
+    private func runAppleScript(script: String) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            process.terminationHandler = { _ in
+                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+                let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+                let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+
+                let combined = [
+                    stdoutText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    stderrText.trimmingCharacters(in: .whitespacesAndNewlines),
+                ]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+
+                let exitCode = process.terminationStatus
+                let header = "Exit \(exitCode)"
+                let output = combined.isEmpty ? header : "\(header)\n\(combined)"
+                continuation.resume(returning: output)
+            }
+        }
     }
 
     private func runShortcutsCLI(shortcutName: String, input: String?) async throws -> String {

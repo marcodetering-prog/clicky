@@ -107,6 +107,12 @@ final class CompanionManager: ObservableObject {
         }
     }
 
+    @Published var isMacToolsAppleScriptEnabled: Bool = UserDefaults.standard.object(forKey: "macToolsEnableAppleScript") as? Bool ?? false {
+        didSet {
+            localMacToolRunner.setAppleScriptEnabled(isMacToolsAppleScriptEnabled)
+        }
+    }
+
     @Published var isMacToolsFileWriteEnabled: Bool = UserDefaults.standard.object(forKey: "macToolsEnableFileWrite") as? Bool ?? false {
         didSet {
             localMacToolRunner.setFileWriteEnabled(isMacToolsFileWriteEnabled)
@@ -734,6 +740,7 @@ final class CompanionManager: ObservableObject {
     - only use fs_write_file or shell_run when it's clearly needed. the app will ask the user to allow each action.
     - use shortcuts_run when the user already has an automation set up in the shortcuts app; it's the safest way to do multi-step mac actions.
     - you can use clipboard_get and clipboard_set when it helps move text around quickly, but don't overwrite the clipboard unless the user asked for it.
+    - if you use applescript_run, keep it minimal and focused and only do it when the user explicitly wants automation. the app will ask for approval each time.
 
     element pointing:
     you have a small blue triangle cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
