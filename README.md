@@ -162,6 +162,15 @@ If you want the whole experience to work without external TTS, set:
 Clicky can transcribe using macOS Speech Recognition:
 - `Speech to Text` → `Apple`
 
+## Optional: Miro integration (MCP tools)
+
+If you run the Miro MCP gateway, Clicky can call Miro tools (create stickies/frames/text, search, etc.).
+
+In the app panel:
+1. Set `Miro` → enable “Enable Miro tools”
+2. Set `MCP URL` (example: `https://mcp.ericai.dev/chatgpt/mcp/miro`)
+3. Paste your MCP API key and click `Save` (stored in Keychain)
+
 ## Project structure
 
 ```

@@ -34,6 +34,99 @@ final class OpenAICompatibleChatAPI {
         self.apiKey = apiKey
     }
 
+    struct ToolDefinition {
+        let name: String
+        let description: String?
+        let parameters: [String: Any]
+    }
+
+    struct ToolCall: Decodable {
+        struct FunctionCall: Decodable {
+            let name: String
+            let arguments: String
+        }
+
+        let id: String
+        let type: String
+        let function: FunctionCall
+    }
+
+    struct ChatCompletionResponse: Decodable {
+        struct Choice: Decodable {
+            struct Message: Decodable {
+                let role: String?
+                let content: String?
+                let tool_calls: [ToolCall]?
+            }
+
+            let message: Message
+            let finish_reason: String?
+        }
+
+        let choices: [Choice]
+    }
+
+    func createChatCompletionNonStreaming(
+        messages: [[String: Any]],
+        tools: [ToolDefinition]?
+    ) async throws -> ChatCompletionResponse.Choice.Message {
+        var request = URLRequest(url: chatCompletionsURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        var body: [String: Any] = [
+            "model": model,
+            "stream": false,
+            "max_completion_tokens": 1200,
+            "messages": messages,
+        ]
+
+        if let tools {
+            body["tools"] = tools.map { tool in
+                [
+                    "type": "function",
+                    "function": [
+                        "name": tool.name,
+                        "description": tool.description ?? "",
+                        "parameters": tool.parameters,
+                    ],
+                ]
+            }
+            body["tool_choice"] = "auto"
+        }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw NSError(domain: "OpenAICompatibleChatAPI", code: -1, userInfo: [
+                NSLocalizedDescriptionKey: "Invalid HTTP response",
+            ])
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let responseString = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "OpenAICompatibleChatAPI", code: httpResponse.statusCode, userInfo: [
+                NSLocalizedDescriptionKey: "API Error (\(httpResponse.statusCode)): \(responseString)",
+            ])
+        }
+
+        let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+        guard let firstChoice = decoded.choices.first else {
+            throw NSError(domain: "OpenAICompatibleChatAPI", code: -2, userInfo: [
+                NSLocalizedDescriptionKey: "Missing choices in response",
+            ])
+        }
+
+        return firstChoice.message
+    }
+
     /// Sends a vision/text request with streaming response. Calls `onTextChunk` with the full accumulated text so far.
     func analyzeImageStreaming(
         images: [(data: Data, label: String)],
@@ -185,4 +278,3 @@ final class OpenAICompatibleChatAPI {
         return "image/jpeg"
     }
 }
-

@@ -13,6 +13,8 @@ import SwiftUI
 struct CompanionPanelView: View {
     @ObservedObject var companionManager: CompanionManager
     @State private var emailInput: String = ""
+    @State private var miroApiKeyDraft: String = ""
+    @State private var miroApiKeySaveErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -48,6 +50,12 @@ struct CompanionPanelView: View {
                     .frame(height: 10)
 
                 speechToTextProviderPickerRow
+                    .padding(.horizontal, 16)
+
+                Spacer()
+                    .frame(height: 10)
+
+                miroIntegrationSection
                     .padding(.horizontal, 16)
             }
 
@@ -842,6 +850,94 @@ struct CompanionPanelView: View {
                         .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
                 )
         }
+    }
+
+    // MARK: - Miro
+
+    private var miroIntegrationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("MIRO")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(companionManager.hasMiroMcpApiKeyConfigured ? DS.Colors.success : DS.Colors.warning)
+                        .frame(width: 6, height: 6)
+                    Text(companionManager.hasMiroMcpApiKeyConfigured ? "Configured" : "Missing Key")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(companionManager.hasMiroMcpApiKeyConfigured ? DS.Colors.success : DS.Colors.warning)
+                }
+            }
+
+            Toggle(isOn: $companionManager.isMiroToolsEnabled) {
+                Text("Enable Miro tools")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+            .toggleStyle(.switch)
+
+            localLLMTextFieldRow(
+                label: "MCP URL",
+                placeholder: "https://mcp.ericai.dev/chatgpt/mcp/miro",
+                text: $companionManager.miroMcpBaseURL
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API key")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                HStack(spacing: 8) {
+                    SecureField("paste your MCP api key", text: $miroApiKeyDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .foregroundColor(DS.Colors.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                        )
+
+                    Button(action: {
+                        do {
+                            try companionManager.setMiroMcpApiKey(miroApiKeyDraft)
+                            miroApiKeyDraft = ""
+                            miroApiKeySaveErrorMessage = nil
+                        } catch {
+                            miroApiKeySaveErrorMessage = error.localizedDescription
+                        }
+                    }) {
+                        Text("Save")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(DS.Colors.textOnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(DS.Colors.accent)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                }
+
+                if let miroApiKeySaveErrorMessage {
+                    Text(miroApiKeySaveErrorMessage)
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.warning)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - DM Farza Button

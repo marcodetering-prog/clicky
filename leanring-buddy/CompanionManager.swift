@@ -82,6 +82,10 @@ final class CompanionManager: ObservableObject {
     }()
 
     private var localOpenAICompatibleChatAPI: OpenAICompatibleChatAPI?
+    private let mcpGatewayClient = MCPGatewayClient()
+
+    private static let miroMcpApiKeyKeychainService = "Clicky"
+    private static let miroMcpApiKeyKeychainAccount = "miro_mcp_api_key"
 
     private lazy var elevenLabsTTSClient: ElevenLabsTTSClient = {
         return ElevenLabsTTSClient(proxyURL: "\(Self.workerBaseURL)/tts")
@@ -165,6 +169,42 @@ final class CompanionManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(includeScreenshotsInLocalChatRequests, forKey: "includeScreenshotsInLocalChatRequests")
         }
+    }
+
+    @Published var isMiroToolsEnabled: Bool = UserDefaults.standard.object(forKey: "isMiroToolsEnabled") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(isMiroToolsEnabled, forKey: "isMiroToolsEnabled")
+        }
+    }
+
+    @Published var miroMcpBaseURL: String = UserDefaults.standard.string(forKey: "miroMcpBaseURL") ?? "https://mcp.ericai.dev/chatgpt/mcp/miro" {
+        didSet {
+            UserDefaults.standard.set(miroMcpBaseURL, forKey: "miroMcpBaseURL")
+        }
+    }
+
+    var hasMiroMcpApiKeyConfigured: Bool {
+        let apiKey = KeychainSecretStore.readString(
+            service: Self.miroMcpApiKeyKeychainService,
+            account: Self.miroMcpApiKeyKeychainAccount
+        ) ?? ""
+        return !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func setMiroMcpApiKey(_ apiKey: String) throws {
+        let trimmedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedApiKey.isEmpty {
+            try KeychainSecretStore.delete(
+                service: Self.miroMcpApiKeyKeychainService,
+                account: Self.miroMcpApiKeyKeychainAccount
+            )
+            return
+        }
+        try KeychainSecretStore.upsertString(
+            trimmedApiKey,
+            service: Self.miroMcpApiKeyKeychainService,
+            account: Self.miroMcpApiKeyKeychainAccount
+        )
     }
 
     func setSelectedModel(_ model: String) {
@@ -642,6 +682,9 @@ final class CompanionManager: ObservableObject {
     - instead, when it fits naturally, end by planting a seed — mention something bigger or more ambitious they could try, a related concept that goes deeper, or a next-level technique that builds on what you just explained. make it something worth coming back for, not a question they'd just nod to. it's okay to not end with anything extra if the answer is complete on its own.
     - if you receive multiple screen images, the one labeled "primary focus" is where the cursor is — prioritize that one but reference others if relevant.
 
+    miro tools:
+    if the user is working in miro and asks you to create or edit board content, prefer using miro tools instead of telling them to click around. for example: create sticky notes, frames, text, connectors, and search/list board items. if you need a board id and you can't infer it from context, ask the user for the board url or id.
+
     element pointing:
     you have a small blue triangle cursor that can fly to and point at things on screen. use it whenever pointing would genuinely help the user — if they're asking how to do something, looking for a menu, trying to find a button, or need help navigating an app, point at the relevant element. err on the side of pointing rather than not pointing, because it makes your help way more useful and concrete.
 
@@ -838,16 +881,139 @@ final class CompanionManager: ObservableObject {
                 )
             }
 
-            return try await localOpenAICompatibleChatAPI.analyzeImageStreaming(
-                images: labeledImages,
-                systemPrompt: Self.companionVoiceResponseSystemPrompt,
-                conversationHistory: historyForAPI,
-                userPrompt: userPrompt,
-                onTextChunk: { _ in
-                    // No streaming text display — spinner stays until TTS plays
-                }
+            let responseText = try await analyzeScreensWithLocalLLMAndOptionalMiroTools(
+                localOpenAICompatibleChatAPI: localOpenAICompatibleChatAPI,
+                labeledImages: labeledImages,
+                historyForAPI: historyForAPI,
+                userPrompt: userPrompt
             )
+            return (text: responseText, duration: 0)
         }
+    }
+
+    private func analyzeScreensWithLocalLLMAndOptionalMiroTools(
+        localOpenAICompatibleChatAPI: OpenAICompatibleChatAPI,
+        labeledImages: [(data: Data, label: String)],
+        historyForAPI: [(userPlaceholder: String, assistantResponse: String)],
+        userPrompt: String
+    ) async throws -> String {
+        var messages: [[String: Any]] = []
+
+        messages.append([
+            "role": "system",
+            "content": Self.companionVoiceResponseSystemPrompt,
+        ])
+
+        for (userPlaceholder, assistantResponse) in historyForAPI {
+            messages.append(["role": "user", "content": userPlaceholder])
+            messages.append(["role": "assistant", "content": assistantResponse])
+        }
+
+        var contentBlocks: [[String: Any]] = []
+        for image in labeledImages {
+            contentBlocks.append([
+                "type": "text",
+                "text": image.label,
+            ])
+            contentBlocks.append([
+                "type": "image_url",
+                "image_url": [
+                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())",
+                ],
+            ])
+        }
+        contentBlocks.append([
+            "type": "text",
+            "text": userPrompt,
+        ])
+
+        messages.append(["role": "user", "content": contentBlocks])
+
+        let miroTools: [OpenAICompatibleChatAPI.ToolDefinition]? = try await {
+            guard isMiroToolsEnabled else { return nil }
+
+            let apiKey = KeychainSecretStore.readString(
+                service: Self.miroMcpApiKeyKeychainService,
+                account: Self.miroMcpApiKeyKeychainAccount
+            ) ?? ""
+            let trimmedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedApiKey.isEmpty else { return nil }
+
+            let mcpTools = try await mcpGatewayClient.listTools(
+                mcpBaseURL: miroMcpBaseURL,
+                apiKey: trimmedApiKey
+            )
+
+            // Keep the tool list bounded to avoid blowing up prompt size.
+            let boundedTools = mcpTools.prefix(80)
+
+            return boundedTools.map { tool in
+                OpenAICompatibleChatAPI.ToolDefinition(
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.inputSchema.mapValues { $0.value }
+                )
+            }
+        }()
+
+        // Tool loop: let the model call tools, then feed results back.
+        for _ in 0..<6 {
+            let assistantMessage = try await localOpenAICompatibleChatAPI.createChatCompletionNonStreaming(
+                messages: messages,
+                tools: miroTools
+            )
+
+            if let toolCalls = assistantMessage.tool_calls, !toolCalls.isEmpty {
+                let toolCallsForRequest: [[String: Any]] = toolCalls.map { toolCall in
+                    [
+                        "id": toolCall.id,
+                        "type": toolCall.type,
+                        "function": [
+                            "name": toolCall.function.name,
+                            "arguments": toolCall.function.arguments,
+                        ],
+                    ]
+                }
+
+                messages.append([
+                    "role": "assistant",
+                    "content": assistantMessage.content ?? "",
+                    "tool_calls": toolCallsForRequest,
+                ])
+
+                let apiKey = KeychainSecretStore.readString(
+                    service: Self.miroMcpApiKeyKeychainService,
+                    account: Self.miroMcpApiKeyKeychainAccount
+                ) ?? ""
+                let trimmedApiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                for toolCall in toolCalls {
+                    let argumentsData = toolCall.function.arguments.data(using: .utf8) ?? Data()
+                    let argumentsObject = (try? JSONSerialization.jsonObject(with: argumentsData)) as? [String: Any] ?? [:]
+
+                    let toolResultText = try await mcpGatewayClient.callTool(
+                        mcpBaseURL: miroMcpBaseURL,
+                        apiKey: trimmedApiKey,
+                        toolName: toolCall.function.name,
+                        arguments: argumentsObject
+                    )
+
+                    messages.append([
+                        "role": "tool",
+                        "tool_call_id": toolCall.id,
+                        "content": toolResultText,
+                    ])
+                }
+
+                continue
+            }
+
+            return assistantMessage.content ?? ""
+        }
+
+        throw NSError(domain: "CompanionManager", code: -2, userInfo: [
+            NSLocalizedDescriptionKey: "Tool loop exceeded max iterations.",
+        ])
     }
 
     /// If the cursor is in transient mode (user toggled "Show Clicky" off),
