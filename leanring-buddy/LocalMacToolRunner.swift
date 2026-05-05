@@ -41,8 +41,6 @@ final class LocalMacToolRunner {
     }
 
     func toolDefinitions() -> [OpenAICompatibleChatAPI.ToolDefinition] {
-        guard workspaceManager.hasWorkspaceFolderConfigured else { return [] }
-
         return [
             OpenAICompatibleChatAPI.ToolDefinition(
                 name: "fs_list_dir",
@@ -103,6 +101,69 @@ final class LocalMacToolRunner {
                     "required": ["target"],
                 ]
             ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "mac_frontmost_app",
+                description: "Get the frontmost app name and bundle identifier.",
+                parameters: [
+                    "type": "object",
+                    "properties": [:],
+                    "required": [],
+                ]
+            ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "mac_launch_app",
+                description: "Launch or activate an app by name (e.g. 'Xcode', 'Terminal'). Requires user approval.",
+                parameters: [
+                    "type": "object",
+                    "properties": [
+                        "app_name": ["type": "string", "description": "Application name (as shown in /Applications)."],
+                    ],
+                    "required": ["app_name"],
+                ]
+            ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "mac_reveal_in_finder",
+                description: "Reveal a file/folder in Finder. Path can be absolute or workspace-relative. Requires user approval.",
+                parameters: [
+                    "type": "object",
+                    "properties": [
+                        "path": ["type": "string", "description": "Absolute path or workspace-relative path."],
+                    ],
+                    "required": ["path"],
+                ]
+            ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "clipboard_get",
+                description: "Read the current clipboard as plain text (if available).",
+                parameters: [
+                    "type": "object",
+                    "properties": [:],
+                    "required": [],
+                ]
+            ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "clipboard_set",
+                description: "Set the clipboard to plain text. Requires user approval.",
+                parameters: [
+                    "type": "object",
+                    "properties": [
+                        "text": ["type": "string", "description": "Text to put on the clipboard."],
+                    ],
+                    "required": ["text"],
+                ]
+            ),
+            OpenAICompatibleChatAPI.ToolDefinition(
+                name: "shortcuts_run",
+                description: "Run an Apple Shortcut by name. Requires user approval. This is the safest way to let Clicky control your Mac via automations you define.",
+                parameters: [
+                    "type": "object",
+                    "properties": [
+                        "name": ["type": "string", "description": "Shortcut name (as shown in the Shortcuts app)."],
+                        "input": ["type": "string", "description": "Optional input passed to the shortcut."],
+                    ],
+                    "required": ["name"],
+                ]
+            ),
         ]
     }
 
@@ -118,12 +179,27 @@ final class LocalMacToolRunner {
             return try await handleShellRun(arguments: arguments)
         case "mac_open":
             return try await handleMacOpen(arguments: arguments)
+        case "mac_frontmost_app":
+            return handleFrontmostApp()
+        case "mac_launch_app":
+            return try await handleLaunchApp(arguments: arguments)
+        case "mac_reveal_in_finder":
+            return try await handleRevealInFinder(arguments: arguments)
+        case "clipboard_get":
+            return handleClipboardGet()
+        case "clipboard_set":
+            return try await handleClipboardSet(arguments: arguments)
+        case "shortcuts_run":
+            return try await handleShortcutsRun(arguments: arguments)
         default:
             return nil
         }
     }
 
     private func handleListDir(arguments: [String: JSONValue]) throws -> String {
+        guard workspaceManager.hasWorkspaceFolderConfigured else {
+            return "No workspace folder configured. In Clicky → Mac Tools, click Choose to select a folder."
+        }
         let path = arguments["path"]?.stringValue ?? "."
         let url = try workspaceManager.resolveUserPath(path)
 
@@ -147,6 +223,9 @@ final class LocalMacToolRunner {
     }
 
     private func handleReadFile(arguments: [String: JSONValue]) throws -> String {
+        guard workspaceManager.hasWorkspaceFolderConfigured else {
+            return "No workspace folder configured. In Clicky → Mac Tools, click Choose to select a folder."
+        }
         let path = arguments["path"]?.stringValue ?? ""
         let maxBytes = arguments["max_bytes"]?.intValue ?? 20_000
         let url = try workspaceManager.resolveUserPath(path)
@@ -164,6 +243,9 @@ final class LocalMacToolRunner {
     private func handleWriteFile(arguments: [String: JSONValue]) async throws -> String {
         guard isFileWriteEnabled else {
             throw PermissionError.toolDisabled("File writing is disabled. Enable “File Write” in Clicky → Mac Tools.")
+        }
+        guard workspaceManager.hasWorkspaceFolderConfigured else {
+            return "No workspace folder configured. In Clicky → Mac Tools, click Choose to select a folder."
         }
 
         let path = arguments["path"]?.stringValue ?? ""
@@ -198,6 +280,9 @@ final class LocalMacToolRunner {
     private func handleShellRun(arguments: [String: JSONValue]) async throws -> String {
         guard isShellEnabled else {
             throw PermissionError.toolDisabled("Shell commands are disabled. Enable “Shell” in Clicky → Mac Tools.")
+        }
+        guard workspaceManager.hasWorkspaceFolderConfigured else {
+            return "No workspace folder configured. In Clicky → Mac Tools, click Choose to select a folder."
         }
 
         let command = arguments["command"]?.stringValue ?? ""
@@ -236,6 +321,133 @@ final class LocalMacToolRunner {
         let fileURL = URL(fileURLWithPath: target)
         NSWorkspace.shared.open(fileURL)
         return "Opened path: \(target)"
+    }
+
+    private func handleFrontmostApp() -> String {
+        let app = NSWorkspace.shared.frontmostApplication
+        let name = app?.localizedName ?? "unknown"
+        let bundleIdentifier = app?.bundleIdentifier ?? "unknown"
+        return "Frontmost app: \(name) (\(bundleIdentifier))"
+    }
+
+    private func handleLaunchApp(arguments: [String: JSONValue]) async throws -> String {
+        let appName = arguments["app_name"]?.stringValue ?? ""
+        let approved = approvalPresenter.requestApproval(
+            title: "Clicky wants to open an app",
+            message: "Allow Clicky to launch or activate this app?",
+            details: appName
+        )
+        guard approved else { throw PermissionError.deniedByUser }
+
+        if let appPath = NSWorkspace.shared.fullPath(forApplication: appName) {
+            let appURL = URL(fileURLWithPath: appPath)
+            let configuration = NSWorkspace.OpenConfiguration()
+            _ = try await NSWorkspace.shared.openApplication(at: appURL, configuration: configuration)
+            return "Launched app: \(appName)"
+        }
+
+        let ok = NSWorkspace.shared.launchApplication(appName)
+        return ok ? "Launched app: \(appName)" : "Failed to launch app: \(appName) (app not found)"
+    }
+
+    private func handleRevealInFinder(arguments: [String: JSONValue]) async throws -> String {
+        let path = arguments["path"]?.stringValue ?? ""
+
+        let approved = approvalPresenter.requestApproval(
+            title: "Clicky wants to reveal a file in Finder",
+            message: "Allow Clicky to reveal this path?",
+            details: path
+        )
+        guard approved else { throw PermissionError.deniedByUser }
+
+        let url: URL
+        if path.hasPrefix("/") {
+            url = URL(fileURLWithPath: path)
+        } else if workspaceManager.hasWorkspaceFolderConfigured {
+            url = try workspaceManager.resolveUserPath(path)
+        } else {
+            return "No workspace folder configured, and the path was not absolute."
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        return "Revealed in Finder: \(url.path)"
+    }
+
+    private func handleClipboardGet() -> String {
+        let pasteboard = NSPasteboard.general
+        if let text = pasteboard.string(forType: .string) {
+            return text
+        }
+        return ""
+    }
+
+    private func handleClipboardSet(arguments: [String: JSONValue]) async throws -> String {
+        let text = arguments["text"]?.stringValue ?? ""
+        let approved = approvalPresenter.requestApproval(
+            title: "Clicky wants to set your clipboard",
+            message: "Allow Clicky to overwrite your clipboard?",
+            details: "Characters: \(text.count)"
+        )
+        guard approved else { throw PermissionError.deniedByUser }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        return "Clipboard updated."
+    }
+
+    private func handleShortcutsRun(arguments: [String: JSONValue]) async throws -> String {
+        let name = arguments["name"]?.stringValue ?? ""
+        let input = arguments["input"]?.stringValue
+
+        let approved = approvalPresenter.requestApproval(
+            title: "Clicky wants to run a Shortcut",
+            message: "Allow Clicky to run this Shortcut?",
+            details: input.map { "\(name)\n\nInput:\n\($0)" } ?? name
+        )
+        guard approved else { throw PermissionError.deniedByUser }
+
+        return try await runShortcutsCLI(shortcutName: name, input: input)
+    }
+
+    private func runShortcutsCLI(shortcutName: String, input: String?) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/shortcuts")
+
+        var arguments: [String] = ["run", shortcutName]
+        if let input, !input.isEmpty {
+            arguments += ["--input", input]
+        }
+        process.arguments = arguments
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        return try await withCheckedThrowingContinuation { continuation in
+            process.terminationHandler = { _ in
+                let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+                let stdoutText = String(data: stdoutData, encoding: .utf8) ?? ""
+                let stderrText = String(data: stderrData, encoding: .utf8) ?? ""
+
+                let combined = [
+                    stdoutText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    stderrText.trimmingCharacters(in: .whitespacesAndNewlines),
+                ]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+
+                let exitCode = process.terminationStatus
+                let header = "Exit \(exitCode)"
+                let output = combined.isEmpty ? header : "\(header)\n\(combined)"
+                continuation.resume(returning: output)
+            }
+        }
     }
 
     private func runShellCommand(
