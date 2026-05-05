@@ -16,6 +16,7 @@ import SwiftUI
 
 extension Notification.Name {
     static let clickyDismissPanel = Notification.Name("clickyDismissPanel")
+    static let clickyCheckForUpdates = Notification.Name("clickyCheckForUpdates")
 }
 
 /// Custom NSPanel subclass that can become the key window even with

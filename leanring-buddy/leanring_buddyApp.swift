@@ -50,7 +50,7 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
             menuBarPanelManager?.showPanelOnLaunch()
         }
         registerAsLoginItemIfNeeded()
-        // startSparkleUpdater()
+        startSparkleUpdater()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -80,10 +80,21 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         )
         self.sparkleUpdaterController = updaterController
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCheckForUpdates),
+            name: .clickyCheckForUpdates,
+            object: nil
+        )
+
         do {
             try updaterController.updater.start()
         } catch {
             print("⚠️ Clicky: Sparkle updater failed to start: \(error)")
         }
+    }
+
+    @objc private func handleCheckForUpdates() {
+        sparkleUpdaterController?.updater.checkForUpdates()
     }
 }

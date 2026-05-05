@@ -999,6 +999,22 @@ struct CompanionPanelView: View {
                 Spacer()
 
                 Button(action: {
+                    NotificationCenter.default.post(name: .clickyCheckForUpdates, object: nil)
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("Updates")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(DS.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+
+                Spacer()
+
+                Button(action: {
                     companionManager.replayOnboarding()
                 }) {
                     HStack(spacing: 6) {

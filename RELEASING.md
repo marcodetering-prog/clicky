@@ -4,6 +4,14 @@ Clicky uses **Sparkle** for auto-updates. Releases are published via **GitHub Re
 
 `https://github.com/marcodetering-prog/clicky/releases/latest/download/appcast.xml`
 
+## How updates work (DMG + auto-update)
+
+- **Initial install:** distribute a DMG (drag to Applications).
+- **Auto-updates:** Sparkle downloads a **zip** containing `Clicky.app` from GitHub Releases and applies the update (typically requires a relaunch).
+- **Manual check:** click `Updates` in the Clicky panel footer to force an update check.
+
+Note: For friends/public distribution where the app launches cleanly and auto-updates reliably, you generally need **Developer ID Application** signing + notarization (Apple Developer Program). Unsigned/dev-signed builds can trigger Gatekeeper warnings and may not update cleanly across machines.
+
 ## One-time setup
 
 ### 1) Sparkle EdDSA keys
@@ -63,3 +71,9 @@ git push origin v1.0.1
 
 GitHub Actions builds a notarized `Clicky-<version>.zip`, generates a signed `appcast.xml`,
 and attaches both to the GitHub Release.
+
+## Test an update locally
+
+1. Install an older version (from a DMG or by copying `Clicky.app` into `/Applications`).
+2. Tag + push a new version.
+3. Launch Clicky and click `Updates` (or wait for Sparkle’s scheduled check).
