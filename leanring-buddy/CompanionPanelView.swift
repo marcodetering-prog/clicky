@@ -15,6 +15,7 @@ struct CompanionPanelView: View {
     @State private var emailInput: String = ""
     @State private var miroApiKeyDraft: String = ""
     @State private var miroApiKeySaveErrorMessage: String?
+    @State private var hasRefreshedLocalModelsOnAppear: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -111,6 +112,11 @@ struct CompanionPanelView: View {
         }
         .frame(width: 320)
         .background(panelBackground)
+        .onAppear {
+            guard !hasRefreshedLocalModelsOnAppear else { return }
+            hasRefreshedLocalModelsOnAppear = true
+            companionManager.refreshDetectedLocalModels()
+        }
     }
 
     // MARK: - Header
@@ -824,6 +830,8 @@ struct CompanionPanelView: View {
                 text: $companionManager.localOpenAICompatibleModel
             )
 
+            localDetectedModelsRow
+
             Toggle(isOn: $companionManager.includeScreenshotsInLocalChatRequests) {
                 Text("Include screenshots")
                     .font(.system(size: 12, weight: .medium))
@@ -833,6 +841,74 @@ struct CompanionPanelView: View {
             .padding(.top, 2)
         }
         .padding(.vertical, 4)
+    }
+
+    private var localDetectedModelsRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Detected models")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(DS.Colors.textTertiary)
+
+                Spacer()
+
+                Button(action: {
+                    companionManager.refreshDetectedLocalModels()
+                }) {
+                    Text("Refresh")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DS.Colors.textTertiary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                        .overlay(
+                            Capsule().stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+
+            if let statusText = companionManager.detectedLocalModelsStatusText {
+                Text(statusText)
+                    .font(.system(size: 10))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+
+            if companionManager.detectedLocalOpenAICompatibleModels.isEmpty {
+                Text("Tip: for ai-coder, use qwen3.5:9b or qwen2.5-coder:14b-instruct.")
+                    .font(.system(size: 10))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(companionManager.detectedLocalOpenAICompatibleModels, id: \.self) { modelID in
+                            Button(action: {
+                                companionManager.localOpenAICompatibleModel = modelID
+                            }) {
+                                Text(modelID)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(DS.Colors.textSecondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule()
+                                            .fill(companionManager.localOpenAICompatibleModel == modelID ? Color.white.opacity(0.12) : Color.white.opacity(0.06))
+                                    )
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(DS.Colors.borderSubtle, lineWidth: 0.5)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .pointerCursor()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(.top, 2)
     }
 
     private func localLLMTextFieldRow(label: String, placeholder: String, text: Binding<String>) -> some View {

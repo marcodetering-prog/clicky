@@ -83,6 +83,7 @@ final class CompanionManager: ObservableObject {
 
     private var localOpenAICompatibleChatAPI: OpenAICompatibleChatAPI?
     private let mcpGatewayClient = MCPGatewayClient()
+    private let localModelDiscoveryClient = LocalModelDiscoveryClient()
 
     private static let miroMcpApiKeyKeychainService = "Clicky"
     private static let miroMcpApiKeyKeychainAccount = "miro_mcp_api_key"
@@ -179,6 +180,7 @@ final class CompanionManager: ObservableObject {
         didSet {
             UserDefaults.standard.set(localOpenAICompatibleBaseURL, forKey: "localOpenAICompatibleBaseURL")
             rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+            refreshDetectedLocalModels()
         }
     }
 
@@ -189,6 +191,10 @@ final class CompanionManager: ObservableObject {
             rebuildLocalOpenAICompatibleChatAPIIfNeeded()
         }
     }
+
+    @Published private(set) var detectedLocalOpenAICompatibleModels: [String] = []
+    @Published private(set) var detectedLocalModelsStatusText: String?
+    private var localModelsRefreshTask: Task<Void, Never>?
 
     /// Optional API key for OpenAI-compatible providers. Many local servers ignore this.
     @Published var localOpenAICompatibleAPIKey: String = UserDefaults.standard.string(forKey: "localOpenAICompatibleAPIKey") ?? "" {
@@ -257,6 +263,9 @@ final class CompanionManager: ObservableObject {
         selectedChatProvider = chatProvider
         UserDefaults.standard.set(chatProvider.rawValue, forKey: "selectedChatProvider")
         rebuildLocalOpenAICompatibleChatAPIIfNeeded()
+        if selectedChatProvider == .localOpenAICompatible {
+            refreshDetectedLocalModels()
+        }
     }
 
     // MARK: - Mac Tools UI Actions
@@ -285,6 +294,30 @@ final class CompanionManager: ObservableObject {
             apiKey: apiKeyToUse,
             model: modelToUse
         )
+    }
+
+    func refreshDetectedLocalModels() {
+        localModelsRefreshTask?.cancel()
+        detectedLocalModelsStatusText = "Checking…"
+
+        let baseURL = localOpenAICompatibleBaseURL
+        let apiKey = localOpenAICompatibleAPIKey
+
+        localModelsRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let modelIDs = try await localModelDiscoveryClient.listModelIDs(
+                    openAICompatibleBaseURL: baseURL,
+                    apiKey: apiKey
+                )
+                self.detectedLocalOpenAICompatibleModels = modelIDs
+                self.detectedLocalModelsStatusText = modelIDs.isEmpty ? "No models found." : "Found \(modelIDs.count)."
+            } catch {
+                self.detectedLocalOpenAICompatibleModels = []
+                self.detectedLocalModelsStatusText = "Model check failed."
+                print("⚠️ Local model discovery failed: \(error)")
+            }
+        }
     }
 
     /// User preference for whether the Clicky cursor should be shown.
